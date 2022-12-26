@@ -16,6 +16,8 @@ char TAC[] = "tac";
 char DIRNAME[] = "dirname";
 int CHILD_PROCESS = 0;
 
+static char *line_read = (char *)NULL;
+
 /**
  * in - Must be opened
  * out - Must be opened
@@ -42,71 +44,52 @@ void ls_readFolder(DIR *dir, bool modifiers[])
  * -l     use a long listing format
  * -S     sort by file size, largest first
  */
-void ls_command(int argc, char const *argv[])
+void ls_command(char *input)
 {
+    bool modifiers[4];
+    modifiers[0] = (strstr(input, "-a") != NULL);
+    modifiers[1] = (strstr(input, "-F") != NULL);
+    modifiers[2] = (strstr(input, "-l") != NULL);
+    modifiers[3] = (strstr(input, "-S") != NULL);
+
+    // int cwd = current_path();
+    //  DIR actualDir;
+}
+
+/* Read a string, and return a pointer to it.  Returns NULL on EOF. */
+char *readLine()
+{
+    if (line_read)
+    {
+        free(line_read);
+        line_read = (char *)NULL;
+    }
+    line_read = readline("");
+    if (line_read && *line_read)
+        add_history(line_read);
+    return (line_read);
 }
 
 int main(int argc, char const *argv[])
 {
     printf("Welcome to Julio Domínguez Arjona console\n");
     bool exit = false;
-    char line[MAX_INPUT_LINE];
-    u_char lineIndex = 0;
 
     while (!exit)
     {
-        /*
-        char c = getchar();
-        printf("Key readed %c", c);
-        if(c == ARROW_UP){
+        readLine();
 
-        } else if (C == NEXT_LINE){
-
-        }*/
-
-        printf("> ");
-        fgets(line, MAX_INPUT_LINE, stdin);
-
-        if (strncmp(line, EXIT, strlen(EXIT)) == 0)
+        if (strncmp(line_read, EXIT, strlen(EXIT)) == 0)
         {
             exit = true;
         }
         else
         {
-            if (strncmp(line, LS, strlen(LS)))
+            if (strncmp(line_read, LS, strlen(LS)))
             {
-                char *modifiers = strtok(line, " | ");
-                ls_command(line);
+                ls_command(line_read);
             }
-
-            // char *token = strtok(line, " | ");
-            // while (token != NULL)
-            // {
-            //     int fd[2];
-            //     if (pipe(fd) < 0)
-            //     {
-            //         perror("Error opening the pipe\n");
-            //         return 1;
-            //     }
-            //     int id;
-            //     if ((id = fork()) < 0)
-            //     {
-            //         perror("Error creating fork\n");
-            //         return 2;
-            //     }
-
-            //     if (id == CHILD_PROCESS)
-            //     {
-            //     }
-            //     else
-            //     {
-            //         printf("%s\n", token);
-            //         token = strtok(NULL, " | ");
-            //     }
-            // }
         }
-
-        // To pipe between processes pipe();
     }
     return 0;
 }
