@@ -98,3 +98,5 @@ GRADING
 Deadline: Week 14 (Operating Systems laboratory)
 IMPORTANT: No delays of any reason are accepted. A project that has not been delivered by the deadline is awarded 0 points. NO EXCEPTIONS.
 ------------------------------------------------------------------------------------------------------------------------------------------
+
+https://man7.org/linux/man-pages/dir_all_alphabetic.html
