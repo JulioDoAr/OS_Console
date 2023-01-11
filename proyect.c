@@ -252,7 +252,7 @@ void ls_sortEntries(struct dirent **entries, int totalEntries, char *basePath)
     { // Bubble sort algoritm
         for (int j = 0; j < totalEntries - i - 1; j++)
         {
-            if (entriesSize[j] > entriesSize[j + 1])
+            if (entriesSize[j] < entriesSize[j + 1])
             {
                 tmp = entries[j];
                 entries[j] = entries[j + 1];
