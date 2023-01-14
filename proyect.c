@@ -25,8 +25,9 @@
 #define COLOR_BOLD "\e[1m"
 #define RED "\x1b[31m"
 #define GLOW "\x1b[1m"
-#define RESET "\x1b[0m"
+#define YELLOW "\033[33m"
 #define COLOR_OFF "\e[m"
+#define RESET "\x1b[0m"
 
 int MAX_INPUT_LINE = 1024;
 int ARROW_UP = 24;
@@ -40,7 +41,7 @@ int CHILD_PROCESS = 0;
 static char *line_read = (char *)NULL;
 static char current_directory[PATH_MAX];
 
-void utils_openDir(char *path, DIR *directory)
+DIR *utils_openDir(char *path, DIR *directory)
 {
     directory = NULL;
     if (path != NULL)
@@ -64,6 +65,7 @@ void utils_openDir(char *path, DIR *directory)
             //     printf("Unable to open \"%s\"\n", fullPath);
         }
     }
+    return directory;
 }
 
 void utils_printArgcArgv(int const argc, char **argv)
@@ -154,7 +156,7 @@ void tac_command(int const argc, char **argv)
         return;
     }
 
-    utils_openDir(source, sourceDIR);
+    sourceDIR = utils_openDir(source, sourceDIR);
     if (!sourceDIR)
     {
         printf("TAC - ERR: Source file does not exist. %s\n", source);
@@ -162,7 +164,7 @@ void tac_command(int const argc, char **argv)
     }
     if (destiny)
     {
-        utils_openDir(destiny, destinyDIR);
+        destinyDIR = utils_openDir(destiny, destinyDIR);
         if (destinyDIR == NULL)
         {
             printf("TAC - ERR: Destiny file does not exist. %s\n", destiny);
@@ -237,7 +239,7 @@ void ls_sortEntries(struct dirent **entries, int totalEntries, char *basePath)
     for (int i = 0; i < totalEntries; i++)
     {
         strcpy(path, basePath);
-        strcat(path, "/");
+        strcat(path, "/\0");
         strcat(path, entries[i]->d_name);
 
         struct stat fStat;
@@ -362,6 +364,7 @@ void ls_execute(DIR *dir, bool *modifiers, char *basePath)
  */
 void ls_command(int const argc, char **argv)
 {
+    printf("%sLS - INF: ls_command%s\n", YELLOW, COLOR_OFF);
     char *lsBasePath = NULL;
     DIR *dir = NULL;
     bool modifiers[4];
