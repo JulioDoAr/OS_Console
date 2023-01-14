@@ -13,22 +13,12 @@
 #include <readline/history.h>
 #endif
 
-#define COLOR_BOLD "\e[1m"
-#define RED "\x1b[31m"
-#define GLOW "\x1b[1m"
-#define YELLOW "\033[33m"
-#define COLOR_OFF "\e[m"
-#define RESET "\x1b[0m"
-
 #define PARENT_READ readpipe[0]
 #define CHILD_WRITE readpipe[1]
 #define CHILD_READ writepipe[0]
 #define PARENT_WRITE writepipe[1]
 
 static const char EXIT[] = "exit";
-static const int CHILD_PROCESS = 0;
-static const int INPUT_END = 1;
-static const int OUTPUT_END = 0;
 
 static char current_directory[PATH_MAX];
 
@@ -60,16 +50,13 @@ int main(int const argc, char const *argv[])
         line_read = readLineAndAddToHistoryIfNeccesary(line_read);
 
         if (strncmp(line_read, EXIT, strlen(EXIT)) == 0)
-        {
             finish = true;
-        }
         else
         {
-            int commandIndex = 0;
-            char *token = strtok(line_read, " | ");
+            int firstFork = 0;
+            char *token = strtok(line_read, "|");
             while (token)
             {
-                printf("Next token=%s\n", token);
                 wordexp_t formattedInput;
                 wordexp(token, &formattedInput, WRDE_REUSE);
 
@@ -79,48 +66,76 @@ int main(int const argc, char const *argv[])
                     perror("Cannot create pipe. ");
                     exit(EXIT_FAILURE);
                 }
+
                 int pid = fork();
                 switch (pid)
                 {
-                case -1:
+                case -1: // FORK ERROR
                     perror("Fork: ");
                     exit(EXIT_FAILURE);
                     break;
-                case 0:
+                case 0:                 // CHILD
+                    if (firstFork == 0) // OPEN PIPES
+                    {
+                        close(PARENT_WRITE);
+                        close(PARENT_READ);
+                        close(CHILD_READ);
+                        dup2(CHILD_WRITE, STDOUT_FILENO);
+                    }
+                    else
+                    {
+                        close(PARENT_WRITE);
+                        close(PARENT_READ);
+                        // close(CHILD_WRITE);
+                        dup2(CHILD_READ, STDIN_FILENO);
+                        // close(CHILD_READ);
+                        dup2(CHILD_WRITE, STDOUT_FILENO);
+                    }
 
-                    close(PARENT_WRITE);
-                    // close(PARENT_READ);
-
-                    dup2(CHILD_READ, STDIN_FILENO);
-                    close(CHILD_READ);
-                    dup2(CHILD_WRITE, STDOUT_FILENO);
-                    // close(CHILD_WRITE);
-
-                    if (execvp(formattedInput.we_wordv[0], formattedInput.we_wordv) == -1)
+                    if (execvp(formattedInput.we_wordv[0], formattedInput.we_wordv) == -1) // EXECUTE COMMAND
                     {
                         perror("Error: ");
                         exit(EXIT_FAILURE);
                     }
+                    if (firstFork == 0) // CLOSE PIPES
+                    {
+                        close(CHILD_WRITE);
+                    }
+                    else
+                    {
+                        close(CHILD_READ);
+                        close(CHILD_WRITE);
+                    }
                     exit(EXIT_SUCCESS);
                     break;
-                default:
-                    printf("Waiting to finish fork...\n");
-                    waitpid(pid, &status, 0);
-                    printf("Fork finished!\n");
+                default: // PARENT
+                    token = strtok(NULL, "|");
+                    waitpid(pid, &status, 0); // WAIT
 
-                    dup2(PARENT_READ, STDIN_FILENO);
-                    char c;
-                    while (read(PARENT_READ, &c, sizeof(char)) < 0)
-                    {
-                        printf("%c", c);
-                    }
-                    break;
-
+                    // OPEN PIPES
                     close(CHILD_READ);
                     close(CHILD_WRITE);
+                    // close(PARENT_READ);
+                    // close(PARENT_WRITE);
+                    // dup2(PARENT_READ, STDIN_FILENO);
+                    close(PARENT_WRITE);
+
+                    char c;
+                    while (read(PARENT_READ, &c, sizeof(char)) > 0)
+                    {
+                        if (token == NULL) // Will not be more forks
+                            printf("%c", c);
+                        else
+                            write(PARENT_WRITE, &c, sizeof(char));
+                    }
+                    dup2(PARENT_WRITE, STDOUT_FILENO);
+
+                    // CLOSE PIPES
+                    close(PARENT_READ);
+                    close(PARENT_WRITE);
+                    break;
                 }
-                commandIndex++;
-                token = strtok(NULL, " | ");
+                firstFork++;
             }
         }
     }
