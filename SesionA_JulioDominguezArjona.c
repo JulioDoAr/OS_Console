@@ -87,8 +87,8 @@ int main(int const argc, char const *argv[])
                         close(PARENT_WRITE);
                         close(PARENT_READ);
                         // close(CHILD_WRITE);
-                        dup2(CHILD_READ, STDIN_FILENO);
-                        // close(CHILD_READ);
+                        // dup2(CHILD_READ, STDIN_FILENO);
+                        close(CHILD_READ);
                         dup2(CHILD_WRITE, STDOUT_FILENO);
                     }
 
@@ -115,10 +115,8 @@ int main(int const argc, char const *argv[])
                     // OPEN PIPES
                     close(CHILD_READ);
                     close(CHILD_WRITE);
-                    // close(PARENT_READ);
-                    // close(PARENT_WRITE);
-                    // dup2(PARENT_READ, STDIN_FILENO);
                     close(PARENT_WRITE);
+                    dup2(PARENT_WRITE, STDOUT_FILENO);
 
                     char c;
                     while (read(PARENT_READ, &c, sizeof(char)) > 0)
@@ -126,9 +124,10 @@ int main(int const argc, char const *argv[])
                         if (token == NULL) // Will not be more forks
                             printf("%c", c);
                         else
+                        {
                             write(PARENT_WRITE, &c, sizeof(char));
+                        }
                     }
-                    dup2(PARENT_WRITE, STDOUT_FILENO);
 
                     // CLOSE PIPES
                     close(PARENT_READ);

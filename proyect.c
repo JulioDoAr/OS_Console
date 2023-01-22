@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <wordexp.h>
 #include <dirent.h>
+#include <sys/wait.h>
 #include <errno.h>
 #include <pwd.h>
 #include <grp.h>
@@ -28,6 +29,10 @@
 #define YELLOW "\033[33m"
 #define COLOR_OFF "\e[m"
 #define RESET "\x1b[0m"
+#define PARENT_READ readpipe[0]
+#define CHILD_WRITE readpipe[1]
+#define CHILD_READ writepipe[0]
+#define PARENT_WRITE writepipe[1]
 
 int MAX_INPUT_LINE = 1024;
 int ARROW_UP = 24;
@@ -268,6 +273,12 @@ void ls_sortEntries(struct dirent **entries, int totalEntries, char *basePath)
     }
 }
 
+char *formatdate(char *buff, time_t val)
+{
+    strftime(buff, 200, "%m %d %H:%M", localtime(&val));
+    return buff;
+}
+
 void ls_execute(DIR *dir, bool *modifiers, char *basePath)
 {
     int totalEntries = ls_countEntries(dir, modifiers[0]);
@@ -312,12 +323,10 @@ void ls_execute(DIR *dir, bool *modifiers, char *basePath)
         { //-l     use a long listing format
             strcpy(path, basePath);
             strcat(path, "/");
-            strcat(path, filename);
+            strcat(path, entry->d_name);
 
             struct stat fStat;
             lstat(path, &fStat);
-            struct passwd *pw = getpwuid(fStat.st_uid);
-            struct group *gr = getgrgid(fStat.st_gid);
 
             // typeOfFile
             printf((S_ISDIR(fStat.st_mode)) ? "d" : (S_ISLNK(fStat.st_mode)) ? "l"
@@ -332,20 +341,20 @@ void ls_execute(DIR *dir, bool *modifiers, char *basePath)
             printf((fStat.st_mode & S_IROTH) ? "r" : "-");
             printf((fStat.st_mode & S_IWOTH) ? "w" : "-");
             printf((fStat.st_mode & S_IXOTH) ? "x" : "-");
-
             // Hard links
             printf(" %zu ", fStat.st_nlink);
-
             // Name of file owner
+            struct passwd *pw = getpwuid(fStat.st_uid);
             printf("%s ", pw->pw_name);
             // Name of group
+            struct group *gr = getgrgid(fStat.st_gid);
             printf("%s ", gr->gr_name);
-
             // File size
             printf("%zu ", fStat.st_size);
-            // Last updated date and time
-            // FIX: 1673451237 - ene 11 17:34
-            printf("%zu ", fStat.st_mtime);
+            // Last updated date and time [month day hour:minutes]
+            // printf(" %s ", fStat.st_mtime);
+            char date[12];
+            printf(" %s ", formatdate(date, fStat.st_mtime));
             // Dedicated file name
             printf("%s \n", filename);
         }
@@ -365,7 +374,6 @@ void ls_execute(DIR *dir, bool *modifiers, char *basePath)
 void ls_command(int const argc, char **argv)
 {
     printf("%sLS - INF: ls_command%s\n", YELLOW, COLOR_OFF);
-    char *lsBasePath = NULL;
     DIR *dir = NULL;
     bool modifiers[4];
     modifiers[0] = false;
@@ -396,25 +404,14 @@ void ls_command(int const argc, char **argv)
         }
     }
 
-    for (int i = 0; i < 4; i++)
-    {
-        printf("%d=", i);
-        printf(modifiers[i] ? "true" : "false");
-        printf(", ");
-    }
-    printf("\n");
+    printf("a=%s, F=%s, l=%s, S=%s\n", modifiers[0] ? "true" : "false", modifiers[1] ? "true" : "false",
+           modifiers[2] ? "true" : "false", modifiers[3] ? "true" : "false");
 
-    for (int i = optind + 1; i < argc; i++)
-    {
-        // printf("%s -", argv[i]);
-        // if (strncmp(argv[i], LS, strlen(LS)) == 0)
-        //     continue;
-        // else if (lsBasePath == NULL)
-        lsBasePath = argv[i];
-    }
-
-    if (lsBasePath == NULL)
-        lsBasePath = current_directory;
+    char lsBasePath[PATH_MAX];
+    if (optind + 1 < argc)
+        strcpy(lsBasePath, argv[optind + 1]);
+    else
+        strcpy(lsBasePath, current_directory);
 
     dir = opendir(lsBasePath);
     if (dir == NULL)
@@ -501,40 +498,76 @@ char *readLineAndAddToHistoryIfNeccesary()
     return (line_read);
 }
 
+void main_executeCommand(char *token)
+{
+    wordexp_t fi;
+    wordexp(token, &fi, WRDE_REUSE);
+
+    if (strncmp(line_read, MAN, strlen(MAN)) == 0)
+        man_command(fi.we_wordc, fi.we_wordv);
+    else if (strncmp(line_read, LS, strlen(LS)) == 0)
+        ls_command(fi.we_wordc, fi.we_wordv);
+    else if (strncmp(line_read, TAC, strlen(TAC)) == 0)
+        tac_command(fi.we_wordc, fi.we_wordv);
+    else if (strncmp(line_read, DIRNAME, strlen(DIRNAME)) == 0)
+        dirname_command(fi.we_wordc, fi.we_wordv);
+    else
+    {
+        if (execvp(fi.we_wordv[0], fi.we_wordv) == -1) // EXECUTE COMMAND
+        {
+            perror("Error: ");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+void main_executeFork()
+{
+    int readpipe[2], writepipe[2];
+    int firstFork = 0;
+    char *token = strtok(line_read, "|");
+    while (token)
+    {
+        int status = 0;
+        if (pipe(readpipe) < 0 || pipe(writepipe) < 0)
+        {
+            perror("Pipe creation: ");
+            exit(EXIT_FAILURE);
+        }
+
+        int pid = fork();
+        switch (pid)
+        {
+        case -1: // FORK ERROR
+            perror("Fork: ");
+            exit(EXIT_FAILURE);
+            break;
+        case 0: // CHILD
+            main_executeCommand(token);
+            exit(EXIT_SUCCESS);
+            break;
+        default: // PARENT
+            token = strtok(NULL, "|");
+            waitpid(pid, &status, 0); // WAIT
+            break;
+        }
+        firstFork++;
+    }
+}
+
 int main(int const argc, char const *argv[])
 {
     getcwd(current_directory, sizeof(current_directory));
 
     printf("Welcome to Julio Domínguez Arjona console:\n");
-    bool exit = false;
-
-    while (!exit)
+    bool finish = false;
+    while (!finish)
     {
         readLineAndAddToHistoryIfNeccesary();
-
         if (strncmp(line_read, EXIT, strlen(EXIT)) == 0)
-        {
-            exit = true;
-        }
+            finish = true;
         else
-        {
-            wordexp_t formattedInput;
-            wordexp(line_read, &formattedInput, WRDE_REUSE);
-
-            if (strncmp(line_read, MAN, strlen(MAN)) == 0)
-                man_command(formattedInput.we_wordc, formattedInput.we_wordv);
-            else if (strncmp(line_read, LS, strlen(LS)) == 0)
-                ls_command(formattedInput.we_wordc, formattedInput.we_wordv);
-            else if (strncmp(line_read, TAC, strlen(TAC)) == 0)
-                tac_command(formattedInput.we_wordc, formattedInput.we_wordv);
-            else if (strncmp(line_read, DIRNAME, strlen(DIRNAME)) == 0)
-                dirname_command(formattedInput.we_wordc, formattedInput.we_wordv);
-            else
-            {
-                execvp(formattedInput.we_wordv[0], formattedInput.we_wordv + 1);
-                perror(argv[0]);
-            }
-        }
+            main_executeFork();
     }
     return 0;
 }
