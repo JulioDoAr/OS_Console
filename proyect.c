@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #if defined(READLINE_LIBRARY)
 #include "readline.h"
@@ -29,10 +30,6 @@
 #define YELLOW "\033[33m"
 #define COLOR_OFF "\e[m"
 #define RESET "\x1b[0m"
-#define PARENT_READ readpipe[0]
-#define CHILD_WRITE readpipe[1]
-#define CHILD_READ writepipe[0]
-#define PARENT_WRITE writepipe[1]
 
 int MAX_INPUT_LINE = 1024;
 int ARROW_UP = 24;
@@ -45,6 +42,28 @@ int CHILD_PROCESS = 0;
 
 static char *line_read = (char *)NULL;
 static char current_directory[PATH_MAX];
+
+int utils_getFileSize(int file)
+{
+    return lseek(file, 0, SEEK_END) - lseek(file, 0, SEEK_SET);
+}
+
+void utils_getFullPath(char *fullpath, char *filename)
+{
+    if (filename != NULL)
+    {
+        if (filename[0] == '/')
+        {
+            strcpy(fullpath, filename);
+        }
+        else
+        {
+            strcpy(fullpath, current_directory);
+            strcat(fullpath, "/");
+            strcat(fullpath, filename);
+        }
+    }
+}
 
 DIR *utils_openDir(char *path, DIR *directory)
 {
@@ -64,10 +83,10 @@ DIR *utils_openDir(char *path, DIR *directory)
             strcat(fullPath, "/");
             strcat(fullPath, path);
             printf("Triying to open \"%s\"\n", fullPath);
-            // if (access(fullPath, F_OK))
-            directory = opendir(fullPath);
-            // else
-            //     printf("Unable to open \"%s\"\n", fullPath);
+            if (access(fullPath, F_OK))
+                directory = opendir(fullPath);
+            else
+                printf("Unable to open \"%s\"\n", fullPath);
         }
     }
     return directory;
@@ -121,12 +140,40 @@ void dirname_command(int const argc, char **argv)
     }
 }
 
+void tac_readLineRecursive(FILE *file, const bool modifierB, const bool modifierS)
+{
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read;
+    bool hadNL = false;
+    if ((read = getline(&line, &len, file)) != -1)
+    {
+        if (modifierB)
+        {
+            if (line[read - 1] == '\n')
+            {
+                hadNL = true;
+                line[read - 1] = '\0';
+            }
+        }
+        tac_readLineRecursive(file, modifierB, modifierS);
+        if (modifierB && hadNL)
+            printf("\n");
+        printf(line);
+    }
+    if (line)
+        free(line);
+}
+
+/**
+ * -b: attach the separator before instead of after
+ * -s: use STRING as the separator instead of newline
+ */
 void tac_command(int const argc, char **argv)
 {
     bool modifierB = false;
     bool modifierS = false;
-    char *source = NULL, *destiny = NULL;
-    DIR *sourceDIR = NULL, *destinyDIR = NULL;
+    DIR *sourceDIR = NULL;
 
     int opt;
     while ((opt = getopt(argc, argv, "bs")) != -1)
@@ -145,39 +192,37 @@ void tac_command(int const argc, char **argv)
         }
     }
 
+    printf("-b=%s, -s=%s\n", modifierB ? "true" : "false", modifierS ? "true" : "false");
+
+    char filename[PATH_MAX];
+    filename[0] = 0;
     for (; optind < argc; optind++)
     {
         if (strncmp(argv[optind], TAC, strlen(TAC)) == 0)
             continue;
-        else if (source == NULL)
-            source = argv[optind];
-        else if (destiny == NULL)
-            destiny = argv[optind];
+        else if (filename[0] == 0)
+            strcpy(filename, argv[optind]);
     }
 
-    if (source == NULL)
+    if (filename[0] == 0)
     {
         printf("TAC - ERR: Need to provide source files.\nExample: tac <source>\n");
         return;
     }
 
-    sourceDIR = utils_openDir(source, sourceDIR);
-    if (!sourceDIR)
+    char fullpath[PATH_MAX];
+    utils_getFullPath(fullpath, filename);
+
+    FILE *file;
+    file = fopen(fullpath, "r");
+    if (file == NULL)
     {
-        printf("TAC - ERR: Source file does not exist. %s\n", source);
+        printf("TAC - ERR: Need to provide source files.\nExample: tac <source>\n");
         return;
     }
-    if (destiny)
-    {
-        destinyDIR = utils_openDir(destiny, destinyDIR);
-        if (destinyDIR == NULL)
-        {
-            printf("TAC - ERR: Destiny file does not exist. %s\n", destiny);
-            return;
-        }
-    }
+    tac_readLineRecursive(file, modifierB, modifierS);
 
-    printf("TAC - INF: Source=%s, Destiny=%s\n", source, destiny);
+    fclose(file);
 }
 
 /**
@@ -373,7 +418,6 @@ void ls_execute(DIR *dir, bool *modifiers, char *basePath)
  */
 void ls_command(int const argc, char **argv)
 {
-    printf("%sLS - INF: ls_command%s\n", YELLOW, COLOR_OFF);
     DIR *dir = NULL;
     bool modifiers[4];
     modifiers[0] = false;
@@ -404,30 +448,34 @@ void ls_command(int const argc, char **argv)
         }
     }
 
-    printf("a=%s, F=%s, l=%s, S=%s\n", modifiers[0] ? "true" : "false", modifiers[1] ? "true" : "false",
-           modifiers[2] ? "true" : "false", modifiers[3] ? "true" : "false");
+    char filename[PATH_MAX];
+    filename[0] = 0;
+    for (; optind < argc; optind++)
+    {
+        if (strncmp(argv[optind], LS, strlen(LS)) == 0)
+            continue;
+        else if (filename[0] == 0)
+            strcpy(filename, argv[optind]);
+    }
 
-    char lsBasePath[PATH_MAX];
-    if (optind + 1 < argc)
-        strcpy(lsBasePath, argv[optind + 1]);
-    else
-        strcpy(lsBasePath, current_directory);
+    char fullPath[PATH_MAX];
+    utils_getFullPath(fullPath, filename);
 
-    dir = opendir(lsBasePath);
+    dir = opendir(fullPath);
     if (dir == NULL)
     {
         exit(EXIT_FAILURE);
     }
 
-    ls_execute(dir, modifiers, lsBasePath);
+    ls_execute(dir, modifiers, fullPath);
 }
 
 void man_command(int const argc, char **argv)
 {
     if (argc == 1)
     {
-        printf("\"ls\" command. Implemente with moifiers: -l, -s, -a, -F\n");
-        printf("\"tac\" command. Implemente with moifiers: -b, -s\n");
+        printf("\"ls\" command. Implemented with modifiers: -l, -s, -a, -F\n");
+        printf("\"tac\" command. Implemented with modifiers: -b, -s\n");
         printf("\"dirname\" command.\n");
         printf("\"exit\" command. Exit the application.\n");
         printf("Any other command can be executed, but it is not full tested.\n");
@@ -498,60 +546,27 @@ char *readLineAndAddToHistoryIfNeccesary()
     return (line_read);
 }
 
-void main_executeCommand(char *token)
+void main_executeCommand(int const argc, char **argv)
 {
-    wordexp_t fi;
-    wordexp(token, &fi, WRDE_REUSE);
+    // Reset values for getopt
+    optind = 0;
+    opterr = 0;
+    optopt = 0;
 
     if (strncmp(line_read, MAN, strlen(MAN)) == 0)
-        man_command(fi.we_wordc, fi.we_wordv);
+        man_command(argc, argv);
     else if (strncmp(line_read, LS, strlen(LS)) == 0)
-        ls_command(fi.we_wordc, fi.we_wordv);
+        ls_command(argc, argv);
     else if (strncmp(line_read, TAC, strlen(TAC)) == 0)
-        tac_command(fi.we_wordc, fi.we_wordv);
+        tac_command(argc, argv);
     else if (strncmp(line_read, DIRNAME, strlen(DIRNAME)) == 0)
-        dirname_command(fi.we_wordc, fi.we_wordv);
+        dirname_command(argc, argv);
     else
     {
-        if (execvp(fi.we_wordv[0], fi.we_wordv) == -1) // EXECUTE COMMAND
+        if (execvp(argv[0], argv) == -1) // EXECUTE COMMAND
         {
             perror("Error: ");
-            exit(EXIT_FAILURE);
         }
-    }
-}
-
-void main_executeFork()
-{
-    int readpipe[2], writepipe[2];
-    int firstFork = 0;
-    char *token = strtok(line_read, "|");
-    while (token)
-    {
-        int status = 0;
-        if (pipe(readpipe) < 0 || pipe(writepipe) < 0)
-        {
-            perror("Pipe creation: ");
-            exit(EXIT_FAILURE);
-        }
-
-        int pid = fork();
-        switch (pid)
-        {
-        case -1: // FORK ERROR
-            perror("Fork: ");
-            exit(EXIT_FAILURE);
-            break;
-        case 0: // CHILD
-            main_executeCommand(token);
-            exit(EXIT_SUCCESS);
-            break;
-        default: // PARENT
-            token = strtok(NULL, "|");
-            waitpid(pid, &status, 0); // WAIT
-            break;
-        }
-        firstFork++;
     }
 }
 
@@ -567,7 +582,11 @@ int main(int const argc, char const *argv[])
         if (strncmp(line_read, EXIT, strlen(EXIT)) == 0)
             finish = true;
         else
-            main_executeFork();
+        {
+            wordexp_t we;
+            wordexp(line_read, &we, 0);
+            main_executeCommand(we.we_wordc, we.we_wordv);
+        }
     }
     return 0;
 }
