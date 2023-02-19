@@ -159,7 +159,7 @@ void tac_readLineRecursive(FILE *file, const bool modifierB, const bool modifier
         tac_readLineRecursive(file, modifierB, modifierS);
         if (modifierB && hadNL)
             printf("\n");
-        printf(line);
+        printf("%s", line);
     }
     if (line)
         free(line);
@@ -192,8 +192,6 @@ void tac_command(int const argc, char **argv)
         }
     }
 
-    printf("-b=%s, -s=%s\n", modifierB ? "true" : "false", modifierS ? "true" : "false");
-
     char filename[PATH_MAX];
     filename[0] = 0;
     for (; optind < argc; optind++)
@@ -213,13 +211,20 @@ void tac_command(int const argc, char **argv)
     char fullpath[PATH_MAX];
     utils_getFullPath(fullpath, filename);
 
-    FILE *file;
-    file = fopen(fullpath, "r");
-    if (file == NULL)
+    // Check if is file
+    struct stat fileStat;
+    if (stat(fullpath, &fileStat) != 0)
     {
-        printf("TAC - ERR: Need to provide source files.\nExample: tac <source>\n");
+        printf("tac: failed to open '%s' for reading: No such file or directory\n", filename);
         return;
     }
+    if (S_ISDIR(fileStat.st_mode))
+    {
+        printf("tac: %s: read error: Invalid argument\n", filename);
+    }
+
+    FILE *file;
+    file = fopen(fullpath, "r");
     tac_readLineRecursive(file, modifierB, modifierS);
 
     fclose(file);
@@ -528,6 +533,10 @@ void man_command(int const argc, char **argv)
             printf("%sDESCRIPTION%s\n", COLOR_BOLD, COLOR_OFF);
             printf("    Output each NAME with its last non-slash component and trailing slashes removed; if NAME contains no /'s, output '.' (meaning the current directory).\n\n");
         }
+        else
+        {
+            printf("Command %s does not exist.\n", argv[1]);
+        }
     }
     return;
 }
@@ -581,7 +590,7 @@ int main(int const argc, char const *argv[])
         readLineAndAddToHistoryIfNeccesary();
         if (strncmp(line_read, EXIT, strlen(EXIT)) == 0)
             finish = true;
-        else
+        else if (line_read[0] != '\0')
         {
             wordexp_t we;
             wordexp(line_read, &we, 0);
