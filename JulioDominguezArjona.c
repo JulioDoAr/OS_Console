@@ -130,7 +130,7 @@ void dirname_command(int const argc, char **argv)
 {
     if (argc == 1)
     {
-        printf("DIRNAME - ERR: Missing operand\n");
+        printf("DIRNAME - ERR: Missing operand. Example: dirname <path>\n");
         return;
     }
 
@@ -572,10 +572,7 @@ void main_executeCommand(int const argc, char **argv)
         dirname_command(argc, argv);
     else
     {
-        if (execvp(argv[0], argv) == -1) // EXECUTE COMMAND
-        {
-            perror("Error: ");
-        }
+        printf("Offending '%s'\n", argv[0]);
     }
 }
 
